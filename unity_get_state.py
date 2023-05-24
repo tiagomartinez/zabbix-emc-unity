@@ -86,7 +86,7 @@ def convert_to_zabbix_json(data):
 
 def send_data_to_zabbix(zabbix_data, storage_name):
         sender_command = "/usr/bin/zabbix_sender"
-        config_path = "/etc/zabbix/zabbix_agentd.conf"
+        zabbix_server = "zabbix-server"
         time_of_create_file = int(time.time())
         temp_file = "/tmp/{0}_{1}.tmp".format(storage_name, time_of_create_file)
 
@@ -94,7 +94,7 @@ def send_data_to_zabbix(zabbix_data, storage_name):
                 f.write("")
                 f.write("\n".join(zabbix_data))
 
-        send_code = subprocess.call([sender_command, "-vv", "-c", config_path, "-s", storage_name, "-T", "-i", temp_file], stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+        send_code = subprocess.call([sender_command, "-vv", "-z", zabbix_server, "-s", storage_name, "-T", "-i", temp_file], stdout = subprocess.PIPE, stderr = subprocess.PIPE)
         os.remove(temp_file)
         return send_code
 
@@ -112,7 +112,7 @@ def discovering_resources(api_user, api_password, api_ip, api_port, storage_name
 
 			discovered_resource = []
 			for one_object in resource_info['entries']:
-				if ['lun', 'pool'].count(resource) == 1:
+				if ['lun', 'pool', 'filesystem'].count(resource) == 1:
 					one_object_list = {}
 					one_object_list["{#ID}"] = one_object['content']['id']
 					one_object_list["{#NAME}"] = one_object['content']['name'].replace(' ', '_')
@@ -144,6 +144,8 @@ def get_status_resources(api_user, api_password, api_ip, api_port, storage_name,
 				resource_url = "https://{0}:{1}/api/types/{2}/instances?fields=name,health,sizeTotal,sizeUsed,sizeSubscribed".format(api_ip, api_port, resource)
 			elif ['lun'].count(resource) == 1:
 				resource_url = "https://{0}:{1}/api/types/{2}/instances?fields=name,health,sizeTotal,sizeAllocated".format(api_ip, api_port, resource)
+			elif ['filesystem'].count(resource) == 1:
+				resource_url = "https://{0}:{1}/api/types/{2}/instances?fields=name,health,sizeTotal,sizeUsed".format(api_ip, api_port, resource)
 			else:
 				resource_url = "https://{0}:{1}/api/types/{2}/instances?fields=name,health,needsReplacement".format(api_ip, api_port, resource)
 
@@ -176,9 +178,18 @@ def get_status_resources(api_user, api_password, api_ip, api_port, storage_name,
 					state_resources.append("%s %s %s %s" % (storage_name, key_health, timestampnow, one_object['content']['health']['value']))
 					state_resources.append("%s %s %s %s" % (storage_name, key_sizeTotal, timestampnow, one_object['content']['sizeTotal']))
 					state_resources.append("%s %s %s %s" % (storage_name, key_sizeAllocated, timestampnow, one_object['content']['sizeAllocated']))
+			elif ['filesystem'].count(resource) == 1:
+				for one_object in resource_info['entries']:
+					key_health = "health.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_')) # Use filesystem name instead filesystem id on zabbix key
+					key_sizeTotal = "sizeTotal.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_'))
+					key_sizeUsed = "sizeUsed.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_'))
+
+					state_resources.append("%s %s %s %s" % (storage_name, key_health, timestampnow, one_object['content']['health']['value']))
+					state_resources.append("%s %s %s %s" % (storage_name, key_sizeTotal, timestampnow, one_object['content']['sizeTotal']))
+					state_resources.append("%s %s %s %s" % (storage_name, key_sizeUsed, timestampnow, one_object['content']['sizeUsed']))
 			elif ['pool'].count(resource) == 1:
 				for one_object in resource_info['entries']:
-					key_health = "health.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_')) # Use pull name instead lun id on zabbix key
+					key_health = "health.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_')) # Use pool name instead pool id on zabbix key
 					key_sizeUsedBytes = "sizeUsedBytes.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_'))
 					key_sizeTotalBytes = "sizeTotalBytes.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_'))
 					key_sizeSubscribedBytes = "sizeSubscribedBytes.{0}.[{1}]".format(resource, one_object['content']['name'].replace(' ', '_'))
@@ -225,7 +236,7 @@ def main():
 	group.add_argument('--status', action='store_true')
 	arguments = unity_parser.parse_args()
 
-	list_resources = ['battery','ssd','ethernetPort','fcPort','sasPort','fan','powerSupply','storageProcessor','lun','pool','dae','dpe','ioModule','lcc','memoryModule','ssc','uncommittedPort','disk']
+	list_resources = ['battery','ssd','ethernetPort','fcPort','sasPort','fan','powerSupply','storageProcessor','lun','pool','filesystem','dae','dpe','ioModule','lcc','memoryModule','ssc','uncommittedPort','disk']
 	if arguments.discovery:
 		result_discovery = discovering_resources(arguments.api_user, arguments.api_password, arguments.api_ip, arguments.api_port, arguments.storage_name, list_resources)
 		print (result_discovery)
